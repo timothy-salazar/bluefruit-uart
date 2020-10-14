@@ -7,6 +7,16 @@ from datetime import datetime
 INPUT_TIMEOUT = 10
 MODE_PIN = 18
 
+def gpio_setup():
+	"""	This makes sure we're in BCM mode for addressing
+		GPIO pins.
+		It also makes sure that the pin we're using to set
+		the mode is set as an output.
+	"""
+	if GPIO.getmode() != GPIO.BCM:
+		GPIO.setmode(GPIO.BCM)
+	GPIO.setwarnings(False)
+	GPIO.setup(MODE_PIN, GPIO.OUT)
 
 def set_mode(mode):
 	"""	Input:
@@ -16,11 +26,6 @@ def set_mode(mode):
 		This sets the mode. While we're doing setup, it
 		also checks to see that the GPIO mode is set to BCM.
 	"""
-	if GPIO.getmode() != GPIO.BCM:
-		GPIO.setmode(GPIO.BCM)
-	if GPIO.gpio_function(MODE_PIN) == GPIO.OUT:
-		return
-	GPIO.setup(MODE_PIN, GPIO.OUT)
 	if not mode:
 		print("UART Mode")
 		GPIO.output(MODE_PIN, GPIO.LOW)
@@ -36,7 +41,7 @@ def read_bytes(s):
 	"""
 	received_bytes = ''
 	while s.in_waiting:
-		received_bytes += s.read()
+		received_bytes += s.read().decode()
 	return received_bytes
 
 def get_serial():
@@ -66,20 +71,35 @@ def wait_for_reply(s):
 			return s
 	return s
 
-def main(mode, msg):
-	""" Input:
-			mode: if True, the message is sent in command mode. 
-				  if False, the message is sent in UART mode
-			msg: string - the message to be sent to the Bluefruit 
-				 module
-
+def format_message(msg, cmd, key):
+	"""	Inputs:
+			msg: string - what message should we send?
+			cmd: bool - are we in command mode?
+			key: bool - are we in keyboard mode?
 	"""
+	if key:
+		cmd = True
+		msg = f'AT+BLEKEYBOARD={msg}'
+	if cmd:
+		msg = msg + '\r\n'
+	return msg.encode(), cmd
+
+def main(msg, mode):
+	""" Input:
+			msg: string - the message to be sent to the Bluefruit
+				 module
+			mode: if True, the message is sent in command mode
+				  if False, the message is sent over UART
+	"""
+	# Setup
+	gpio_setup()
 	set_mode(mode)
 	time.sleep(.3)
 	s = get_serial()
-	s.write(msg+'\r\n')
+	# Write message
+	s.write(msg)
 	wait_for_reply(s)
-	print('waiting for return bytes')
+	# Cleanup
 	GPIO.cleanup()
 	s.close()
 
@@ -88,5 +108,8 @@ if __name__ == "__main__":
 	parser.add_argument('send', help='string to send via. UART')
 	parser.add_argument('-c', '--command', action='store_true', 
 						help='run in command mode')
+	parser.add_argument('-k', '--keyboard', action='store_true',
+						help='send string over blehiden')
 	args = parser.parse_args()
-	main(args.command, args.send)
+	msg, mode = format_message(args.send, args.command, args.keyboard)
+	main(msg, mode)
